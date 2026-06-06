@@ -140,12 +140,12 @@ jobs:
             sudo postgresql-setup --initdb 2>/dev/null || true
 
             # Rewrite pg_hba.conf so md5 rules come before ident (PostgreSQL checks in order)
-            sudo tee /var/lib/pgsql/data/pg_hba.conf > /dev/null << 'EOF'
-local   all             postgres                                peer
-local   all             all                                     md5
-host    all             all             127.0.0.1/32            md5
-host    all             all             ::1/128                 md5
-EOF
+            printf '%s\n' \
+              'local all postgres peer' \
+              'local all all md5' \
+              'host  all all 127.0.0.1/32 md5' \
+              'host  all all ::1/128 md5' \
+              | sudo tee /var/lib/pgsql/data/pg_hba.conf > /dev/null
 
             sudo systemctl enable postgresql
             sudo systemctl restart postgresql
