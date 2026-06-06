@@ -121,7 +121,7 @@ jobs:
     needs:
       - build-backend
       - build-frontend
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: github.ref == 'refs/heads/feature-JGJ' && github.event_name == 'push'
 
     steps:
       - name: Deploy to EC2 via SSH
@@ -139,9 +139,9 @@ jobs:
 
             if [ -d "$APP_DIR/.git" ]; then
               cd "$APP_DIR"
-              git pull origin main
+              git pull origin feature-JGJ
             else
-              git clone https://github.com/${{ github.repository }}.git "$APP_DIR"
+              git clone -b feature-JGJ https://github.com/${{ github.repository }}.git "$APP_DIR"
               cd "$APP_DIR"
             fi
 
