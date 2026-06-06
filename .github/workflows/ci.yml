@@ -133,6 +133,8 @@ jobs:
           script: |
             set -e
 
+            sudo dnf install -y git
+
             APP_DIR=/home/ec2-user/app
 
             mkdir -p "$APP_DIR"
