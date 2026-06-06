@@ -152,6 +152,8 @@ jobs:
             # Create DB user and database (idempotent)
             sudo -u postgres psql -c "CREATE USER ltiuser WITH PASSWORD 'LTIpass2024!';" 2>/dev/null || true
             sudo -u postgres psql -c 'CREATE DATABASE "LTIdb" OWNER ltiuser;' 2>/dev/null || true
+            sudo -u postgres psql -c 'GRANT ALL PRIVILEGES ON DATABASE "LTIdb" TO ltiuser;' 2>/dev/null || true
+            sudo -u postgres psql -d "LTIdb" -c "GRANT ALL ON SCHEMA public TO ltiuser;" 2>/dev/null || true
 
             APP_DIR=/home/ec2-user/app
             mkdir -p "$APP_DIR"
