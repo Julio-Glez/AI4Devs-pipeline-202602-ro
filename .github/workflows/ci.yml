@@ -139,10 +139,13 @@ jobs:
             # Initialize PostgreSQL data directory (no-op if already initialized)
             sudo postgresql-setup --initdb 2>/dev/null || true
 
-            # Allow password authentication for local TCP connections
-            if ! sudo grep -q "127.0.0.1/32.*md5" /var/lib/pgsql/data/pg_hba.conf; then
-              echo "host all all 127.0.0.1/32 md5" | sudo tee -a /var/lib/pgsql/data/pg_hba.conf
-            fi
+            # Rewrite pg_hba.conf so md5 rules come before ident (PostgreSQL checks in order)
+            sudo tee /var/lib/pgsql/data/pg_hba.conf > /dev/null << 'EOF'
+local   all             postgres                                peer
+local   all             all                                     md5
+host    all             all             127.0.0.1/32            md5
+host    all             all             ::1/128                 md5
+EOF
 
             sudo systemctl enable postgresql
             sudo systemctl restart postgresql
