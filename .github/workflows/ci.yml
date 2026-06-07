@@ -124,66 +124,77 @@ jobs:
     if: github.ref == 'refs/heads/feature-JGJ' && github.event_name == 'push'
 
     steps:
-      - name: Deploy to EC2 via SSH
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 18
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Build backend on runner
+        working-directory: backend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build frontend on runner
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Setup PostgreSQL on EC2
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
-          command_timeout: 30m
           script: |
-            set -e
-
-            # Install git and PostgreSQL
-            sudo dnf install -y git postgresql15-server
-
-            # Initialize PostgreSQL data directory (no-op if already initialized)
+            sudo dnf install -y postgresql15-server
             sudo postgresql-setup --initdb 2>/dev/null || true
-
-            # Rewrite pg_hba.conf so md5 rules come before ident (PostgreSQL checks in order)
-            printf '%s\n' \
-              'local all postgres peer' \
-              'local all all md5' \
-              'host  all all 127.0.0.1/32 md5' \
-              'host  all all ::1/128 md5' \
-              | sudo tee /var/lib/pgsql/data/pg_hba.conf > /dev/null
-
+            printf '%s\n' 'local all postgres peer' 'local all all md5' 'host  all all 127.0.0.1/32 md5' 'host  all all ::1/128 md5' | sudo tee /var/lib/pgsql/data/pg_hba.conf > /dev/null
             sudo systemctl enable postgresql
             sudo systemctl restart postgresql
-
-            # Create DB user and database (idempotent)
             sudo -u postgres psql -c "CREATE USER ltiuser WITH PASSWORD 'LTIpass2024!';" 2>/dev/null || true
             sudo -u postgres psql -c 'CREATE DATABASE "LTIdb" OWNER ltiuser;' 2>/dev/null || true
             sudo -u postgres psql -c 'GRANT ALL PRIVILEGES ON DATABASE "LTIdb" TO ltiuser;' 2>/dev/null || true
             sudo -u postgres psql -d "LTIdb" -c "GRANT ALL ON SCHEMA public TO ltiuser;" 2>/dev/null || true
+            mkdir -p /home/ec2-user/app/backend
+            mkdir -p /home/ec2-user/app/frontend
 
-            APP_DIR=/home/ec2-user/app
-            mkdir -p "$APP_DIR"
+      - name: Copy backend artifacts to EC2
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+          source: "backend/dist,backend/prisma,backend/package.json,backend/package-lock.json"
+          target: "/home/ec2-user/app/"
 
-            if [ -d "$APP_DIR/.git" ]; then
-              cd "$APP_DIR"
-              git pull origin feature-JGJ
-            else
-              git clone -b feature-JGJ https://github.com/${{ github.repository }}.git "$APP_DIR"
-              cd "$APP_DIR"
-            fi
+      - name: Copy frontend build to EC2
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+          source: "frontend/build"
+          target: "/home/ec2-user/app/"
 
-            # Overwrite backend .env with production values (overrides whatever git pulled)
-            printf 'DATABASE_URL=postgresql://ltiuser:LTIpass2024!@localhost:5432/LTIdb\nPORT=3010\n' > "$APP_DIR/backend/.env"
+      - name: Install deps, run migrations and restart services
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+          script: |
+            set -e
+            printf 'DATABASE_URL=postgresql://ltiuser:LTIpass2024!@localhost:5432/LTIdb\nPORT=3010\n' > /home/ec2-user/app/backend/.env
             export DATABASE_URL="postgresql://ltiuser:LTIpass2024!@localhost:5432/LTIdb"
-
-            cd "$APP_DIR/backend"
-            npm ci
+            cd /home/ec2-user/app/backend
+            npm ci --omit=dev
             npx prisma generate
             npx prisma migrate deploy
-            npm run build
-
-            cd "$APP_DIR/frontend"
-            npm ci
-            npm run build
-
-            cd "$APP_DIR/backend"
             pm2 restart backend || pm2 start dist/index.js --name backend
             pm2 save
-
-            sudo cp -r "$APP_DIR/frontend/build/"* /usr/share/nginx/html/
+            sudo cp -r /home/ec2-user/app/frontend/build/* /usr/share/nginx/html/
